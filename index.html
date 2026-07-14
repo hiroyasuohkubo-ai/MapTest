@@ -2,177 +2,413 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0"
   >
+
   <title>現在地を表示する地理院地図</title>
 
+  <!-- LeafletのCSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   >
 
   <style>
+    /* ページ全体を画面いっぱいにする */
     html,
     body {
+      width: 100%;
       height: 100%;
       margin: 0;
+      padding: 0;
     }
 
+    /* 地図を画面いっぱいに表示する */
     #map {
       width: 100%;
       height: 100%;
     }
 
+    /* 画面上部に表示するメッセージ */
     #status {
       position: fixed;
       top: 12px;
       left: 50%;
       z-index: 1000;
-      transform: translateX(-50%);
-      max-width: calc(100% - 32px);
+
+      display: none;
+
+      max-width: calc(100% - 40px);
       padding: 10px 14px;
+
+      transform: translateX(-50%);
+
       border-radius: 8px;
-      background: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.95);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+
       font-size: 14px;
+      line-height: 1.5;
       text-align: center;
     }
 
+    /* 現在地ボタン */
     #locate-button {
       position: fixed;
       right: 16px;
       bottom: 28px;
       z-index: 1000;
-      width: 56px;
-      height: 56px;
+
+      width: 58px;
+      height: 58px;
+
       border: 0;
       border-radius: 50%;
+
       background: white;
       box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-      font-size: 25px;
+
+      font-size: 26px;
       cursor: pointer;
+    }
+
+    #locate-button:active {
+      transform: scale(0.95);
+    }
+
+    /* 位置情報の取得中はボタンを薄くする */
+    #locate-button:disabled {
+      opacity: 0.6;
+      cursor: wait;
     }
   </style>
 </head>
 
 <body>
+  <!-- 地図を表示する場所 -->
   <div id="map"></div>
-  <div id="status">現在地を確認しています…</div>
-  <button id="locate-button" type="button" aria-label="現在地を表示">
+
+  <!-- 状況を表示するメッセージ -->
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <!-- 現在地を取得するボタン -->
+  <button
+    id="locate-button"
+    type="button"
+    aria-label="現在地を表示"
+    title="現在地を表示"
+  >
     ◎
   </button>
 
+  <!-- Leaflet本体 -->
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   ></script>
 
   <script>
-    // 初期位置：十和田市周辺
-    const map = L.map("map").setView([40.6127, 141.2059], 13);
+    /*
+     * 1. 地図を作成する
+     *
+     * 初期位置は十和田市周辺。
+     * 現在地は、ボタンを押すまで取得しない。
+     */
+    const map = L.map("map").setView(
+      [40.6127, 141.2059],
+      13
+    );
 
-    // 国土地理院の標準地図
+    /*
+     * 2. 国土地理院の標準地図を表示する
+     */
     L.tileLayer(
       "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
       {
         attribution:
-          '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>',
+          '<a href="https://maps.gsi.go.jp/development/ichiran.html" ' +
+          'target="_blank" rel="noopener noreferrer">地理院タイル</a>',
+
         maxZoom: 18
       }
     ).addTo(map);
 
-    const statusElement = document.getElementById("status");
-    const locateButton = document.getElementById("locate-button");
+    /*
+     * 3. HTMLの部品を取得する
+     */
+    const statusElement =
+      document.getElementById("status");
 
+    const locateButton =
+      document.getElementById("locate-button");
+
+    /*
+     * 4. 現在地マーカーと精度円を保存する変数
+     *
+     * 初回は作成し、2回目以降は位置だけを更新する。
+     */
     let positionMarker;
     let accuracyCircle;
 
-    function showCurrentPosition() {
-      if (!navigator.geolocation) {
-        statusElement.textContent =
-          "この端末またはブラウザーでは位置情報を利用できません。";
+    /*
+     * 5. メッセージを表示する関数
+     */
+    function showStatus(message) {
+      statusElement.textContent = message;
+      statusElement.style.display = "block";
+    }
+
+    /*
+     * 6. メッセージを非表示にする関数
+     */
+    function hideStatus() {
+      statusElement.style.display = "none";
+    }
+
+    /*
+     * 7. 利用者へ毎回確認してから現在地を取得する
+     *
+     * window.confirmは、このページ独自の確認画面。
+     * ブラウザー標準の位置情報許可とは別のもの。
+     */
+    function confirmAndShowCurrentPosition() {
+      const approved = window.confirm(
+        "現在地を取得し、地図上に表示します。\nよろしいですか？"
+      );
+
+      if (!approved) {
+        showStatus("現在地の取得をキャンセルしました。");
+
+        window.setTimeout(function () {
+          hideStatus();
+        }, 3000);
+
         return;
       }
 
-      statusElement.style.display = "block";
-      statusElement.textContent = "現在地を確認しています…";
+      showCurrentPosition();
+    }
 
+    /*
+     * 8. スマホやパソコンの現在地を取得する
+     */
+    function showCurrentPosition() {
+      /*
+       * ブラウザーが位置情報機能に対応しているか確認する
+       */
+      if (!navigator.geolocation) {
+        showStatus(
+          "この端末またはブラウザーでは位置情報を利用できません。"
+        );
+
+        return;
+      }
+
+      /*
+       * 位置情報取得中は、連続してボタンを押せないようにする
+       */
+      locateButton.disabled = true;
+
+      showStatus("現在地を確認しています…");
+
+      /*
+       * 現在地を1回取得する
+       */
       navigator.geolocation.getCurrentPosition(
+        /*
+         * 位置情報の取得に成功した場合
+         */
         function (position) {
-          const latitude = position.coords.latitude;
-          const longitude = position.coords.longitude;
-          const accuracy = position.coords.accuracy;
-          const currentPosition = [latitude, longitude];
+          const latitude =
+            position.coords.latitude;
 
-          if (positionMarker) {
-            positionMarker.setLatLng(currentPosition);
+          const longitude =
+            position.coords.longitude;
+
+          const accuracy =
+            position.coords.accuracy;
+
+          /*
+           * Leafletでは、
+           * [緯度, 経度]の順番で指定する
+           */
+          const currentPosition = [
+            latitude,
+            longitude
+          ];
+
+          /*
+           * すでにマーカーが存在する場合は、
+           * 新しく作らず位置を更新する
+           */
+          if (positionMarker && accuracyCircle) {
+            positionMarker.setLatLng(
+              currentPosition
+            );
+
             accuracyCircle
               .setLatLng(currentPosition)
               .setRadius(accuracy);
           } else {
-            positionMarker = L.circleMarker(currentPosition, {
-              radius: 9,
-              fillColor: "#1478ff",
-              fillOpacity: 1,
-              color: "#ffffff",
-              weight: 4
-            }).addTo(map);
+            /*
+             * 初回は現在地を示す青い点を作成する
+             */
+            positionMarker = L.circleMarker(
+              currentPosition,
+              {
+                radius: 9,
+                fillColor: "#1478ff",
+                fillOpacity: 1,
+                color: "#ffffff",
+                weight: 4
+              }
+            ).addTo(map);
 
-            accuracyCircle = L.circle(currentPosition, {
-              radius: accuracy,
-              fillOpacity: 0.12,
-              weight: 1
-            }).addTo(map);
+            /*
+             * 位置情報の精度を示す円を作成する
+             */
+            accuracyCircle = L.circle(
+              currentPosition,
+              {
+                radius: accuracy,
+                color: "#1478ff",
+                weight: 1,
+                fillColor: "#1478ff",
+                fillOpacity: 0.12
+              }
+            ).addTo(map);
           }
 
-          map.setView(currentPosition, 17);
+          /*
+           * 地図の中心を現在地へ移動する
+           */
+          map.setView(
+            currentPosition,
+            17
+          );
 
-          statusElement.textContent =
-            "現在地を表示しました（精度：約" +
+          /*
+           * マーカーを押したときに情報を表示する
+           */
+          positionMarker
+            .bindPopup(
+              "現在地<br>" +
+              "緯度：" +
+              latitude.toFixed(6) +
+              "<br>" +
+              "経度：" +
+              longitude.toFixed(6) +
+              "<br>" +
+              "精度：約" +
+              Math.round(accuracy) +
+              "m"
+            );
+
+          /*
+           * 取得完了メッセージ
+           */
+          showStatus(
+            "現在地を表示しました" +
+            "（精度：約" +
             Math.round(accuracy) +
-            "m）";
+            "m）"
+          );
 
-          setTimeout(function () {
-            statusElement.style.display = "none";
+          /*
+           * ボタンを再び押せるようにする
+           */
+          locateButton.disabled = false;
+
+          /*
+           * 3秒後にメッセージを消す
+           */
+          window.setTimeout(function () {
+            hideStatus();
           }, 3000);
         },
 
+        /*
+         * 位置情報の取得に失敗した場合
+         */
         function (error) {
-          let message = "現在地を取得できませんでした。";
+          let message =
+            "現在地を取得できませんでした。";
 
           switch (error.code) {
             case error.PERMISSION_DENIED:
               message =
-                "位置情報の利用が許可されていません。ブラウザーの設定をご確認ください。";
+                "位置情報の利用が許可されていません。" +
+                "ブラウザーまたはスマホの設定をご確認ください。";
               break;
 
             case error.POSITION_UNAVAILABLE:
               message =
-                "現在地を確認できません。屋外など、電波の届きやすい場所でお試しください。";
+                "現在地を確認できませんでした。" +
+                "屋外など、電波の届きやすい場所でお試しください。";
               break;
 
             case error.TIMEOUT:
               message =
-                "現在地の取得がタイムアウトしました。もう一度お試しください。";
+                "現在地の取得がタイムアウトしました。" +
+                "もう一度お試しください。";
+              break;
+
+            default:
+              message =
+                "現在地の取得中にエラーが発生しました。";
               break;
           }
 
-          statusElement.textContent = message;
+          showStatus(message);
+
+          /*
+           * エラー時もボタンを再び押せるようにする
+           */
+          locateButton.disabled = false;
         },
 
+        /*
+         * 位置情報取得時の設定
+         */
         {
+          /*
+           * 可能な場合は高精度な位置情報を使用する
+           */
           enableHighAccuracy: true,
+
+          /*
+           * 最大15秒待つ
+           */
           timeout: 15000,
+
+          /*
+           * 保存済みの古い位置情報を使わず、
+           * 新しい位置を取得する
+           */
           maximumAge: 0
         }
       );
     }
 
-    locateButton.addEventListener("click", showCurrentPosition);
+    /*
+     * 9. 現在地ボタンを押したときの処理
+     *
+     * 毎回、確認画面を表示してから現在地を取得する。
+     */
+    locateButton.addEventListener(
+      "click",
+      confirmAndShowCurrentPosition
+    );
 
-    // ページを開いたとき、自動的に現在地を取得
-    showCurrentPosition();
+    /*
+     * 自動取得は行わない。
+     *
+     * 以前のコードにあった次の処理は記載しない。
+     *
+     * showCurrentPosition();
+     */
   </script>
 </body>
 </html>
