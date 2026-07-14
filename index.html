@@ -119,8 +119,8 @@
     /*
      * 2. 青森県全体をおおよそ囲む範囲
      *
-     * 1つ目：南西側の緯度・経度
-     * 2つ目：北東側の緯度・経度
+     * 1つ目：南西側
+     * 2つ目：北東側
      */
     const aomoriBounds = L.latLngBounds(
       [40.15, 139.40],
@@ -129,9 +129,6 @@
 
     /*
      * 3. 画面サイズに合わせて青森県全体を表示する
-     *
-     * スマホの縦画面・横画面などに応じて、
-     * Leafletが自動的に中心位置とズームを調整する。
      */
     map.fitBounds(aomoriBounds, {
       padding: [10, 10]
@@ -289,15 +286,16 @@
           }
 
           /*
-           * 地図の中心を現在地へ移動する
+           * 青森県全体の表示から、
+           * 現在地へ滑らかに移動しながら拡大する
            */
-          map.setView(
+          map.flyTo(
             currentPosition,
-            17
+            17,
             {
               animate: true,
-              duration: 4
-            }  
+              duration: 5
+            }
           );
 
           /*
@@ -317,7 +315,7 @@
           );
 
           showStatus(
-            "現在地を表示しました" +
+            "現在地へ移動しています" +
             "（精度：約" +
             Math.round(accuracy) +
             "m）"
@@ -325,9 +323,12 @@
 
           locateButton.disabled = false;
 
+          /*
+           * アニメーション終了後にメッセージを消す
+           */
           window.setTimeout(function () {
             hideStatus();
-          }, 3000);
+          }, 5500);
         },
 
         /*
